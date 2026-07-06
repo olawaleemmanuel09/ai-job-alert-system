@@ -1,0 +1,319 @@
+{
+  "name": "AI Job Alerts (Adzuna + Gemini + Telegram)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 8,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "d6d5afd2-c220-4579-8ac2-63e3774697fd",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -160,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.adzuna.com/v1/api/jobs/gb/search/1",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "app_id",
+              "value": "YOUR_ADZUNA_APP_ID"
+            },
+            {
+              "name": "app_key",
+              "value": "YOUR_ADZUNA_APP_KEY"
+            },
+            {
+              "name": "results_per_page",
+              "value": "50"
+            },
+            {
+              "name": "what",
+              "value": "AI automation"
+            },
+            {
+              "name": "what_or",
+              "value": "n8n zapier make.com RPA workflow LLM machine learning integration"
+            },
+            {
+              "name": "max_days_old",
+              "value": "3"
+            },
+            {
+              "name": "sort_by",
+              "value": "date"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "16b00ca3-d728-4a3f-ba5c-3d09575847ae",
+      "name": "Adzuna - Get Jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        60,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "results",
+        "options": {}
+      },
+      "id": "abd2bd2d-e4bd-4557-b2ee-d55aaca2e22c",
+      "name": "Split Jobs",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        280,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Keep only jobs whose title or description mentions an AI / automation keyword.\nconst keywords = [\n  \"ai automation\", \"automation engineer\", \"n8n\", \"zapier\", \"make.com\",\n  \"workflow\", \"rpa\", \"llm\", \"prompt engineer\", \"machine learning\",\n  \"ai engineer\", \"integration engineer\", \"solutions engineer\",\n  \"generative ai\", \"chatbot\", \"conversational ai\"\n];\n\nreturn $input.all().filter(item => {\n  const hay = ((item.json.title || \"\") + \" \" + (item.json.description || \"\")).toLowerCase();\n  return keywords.some(k => hay.includes(k));\n});"
+      },
+      "id": "b1ca2160-85d5-477a-a299-c4316d890500",
+      "name": "Filter AI Roles",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "removeItemsSeenInPreviousExecutions",
+        "dedupeValue": "={{ $json.redirect_url }}",
+        "options": {
+          "historySize": 10000
+        }
+      },
+      "id": "c7fdf884-e93a-4a5f-b11e-81b95caff139",
+      "name": "Remove Seen Jobs",
+      "type": "n8n-nodes-base.removeDuplicates",
+      "typeVersion": 2,
+      "position": [
+        720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Build one Gemini prompt per job. Keep all original job fields so we can use them later.\nconst job = $json;\n\nconst profile = \"AI Automation Engineer. Stack: n8n, Supabase/PostgreSQL, FastAPI, Python, Twilio/WhatsApp API, Docker/nginx on Ubuntu VPS, LLM APIs (Gemini/OpenAI/Claude). Builds production WhatsApp commerce bots, event-ops systems and payment integrations. Open to remote work. Target roles: Automation Engineer, Solutions Engineer, Integration Engineer, AI Engineer.\";\n\nconst prompt =\n  \"You are a strict technical recruiter. Score how well this job fits the candidate.\\n\\n\" +\n  \"CANDIDATE PROFILE:\\n\" + profile + \"\\n\\n\" +\n  \"JOB:\\n\" +\n  \"Title: \" + (job.title || \"\") + \"\\n\" +\n  \"Company: \" + ((job.company && job.company.display_name) || \"\") + \"\\n\" +\n  \"Location: \" + ((job.location && job.location.display_name) || \"\") + \"\\n\" +\n  \"Description: \" + (job.description || \"\") + \"\\n\\n\" +\n  \"Return ONLY minified JSON with these keys: match_score (integer 0-100), verdict (one of Strong, Medium, Weak), reason (max 20 words), remote (true or false). No markdown, no code fences, no extra text.\";\n\nreturn { json: Object.assign({}, job, { prompt: prompt }) };"
+      },
+      "id": "715d895a-0b1b-4e9e-b14f-bf92877f297e",
+      "name": "Build Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-goog-api-key",
+              "value": "YOUR_GEMINI_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"contents\": [ { \"parts\": [ { \"text\": $json.prompt } ] } ], \"generationConfig\": { \"temperature\": 0.2, \"responseMimeType\": \"application/json\" } } }}",
+        "options": {}
+      },
+      "id": "e50a2e64-100e-4703-8785-274487116690",
+      "name": "Gemini - Score Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1160,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Read Gemini's answer, unwrap the JSON string inside it, and merge with the original job.\nconst job = $('Build Prompt').item.json;\n\nlet ai;\ntry {\n  let raw = ($json.candidates\n    && $json.candidates[0]\n    && $json.candidates[0].content\n    && $json.candidates[0].content.parts\n    && $json.candidates[0].content.parts[0]\n    && $json.candidates[0].content.parts[0].text) || \"{}\";\n  // Strip accidental ```json fences if the model ever adds them.\n  raw = raw.replace(/```json/gi, \"\").replace(/```/g, \"\").trim();\n  ai = JSON.parse(raw);\n} catch (e) {\n  ai = { match_score: 0, verdict: \"Weak\", reason: \"Could not parse AI response\", remote: false };\n}\n\nconst salary = job.salary_min\n  ? (\"\\u00A3\" + Math.round(job.salary_min) + \" - \\u00A3\" + Math.round(job.salary_max || job.salary_min))\n  : \"Not listed\";\n\nreturn {\n  json: {\n    title: job.title || \"\",\n    company: (job.company && job.company.display_name) || \"\",\n    location: (job.location && job.location.display_name) || \"\",\n    salary: salary,\n    url: job.redirect_url || \"\",\n    score: (typeof ai.match_score === \"number\") ? ai.match_score : parseInt(ai.match_score || 0, 10) || 0,\n    verdict: ai.verdict || \"Weak\",\n    reason: ai.reason || \"\"\n  }\n};"
+      },
+      "id": "76db9eae-137c-47f2-b74b-2035e01db629",
+      "name": "Parse & Merge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1380,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Only let jobs scoring 65 or higher continue to Telegram.\nreturn $input.all().filter(item => (item.json.score || 0) >= 65);"
+      },
+      "id": "45c7cac2-833c-4ad1-958c-9da2a91024b4",
+      "name": "Keep Strong Matches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=🤖 <b>{{ $json.title }}</b>\n🏢 {{ $json.company }}\n📍 {{ $json.location }}\n💰 {{ $json.salary }}\n\n⭐ Match: <b>{{ $json.score }}/100</b> — {{ $json.verdict }}\n📝 {{ $json.reason }}\n\n🔗 <a href=\"{{ $json.url }}\">Apply here</a>",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "appendAttribution": false
+        }
+      },
+      "id": "65511d0f-4ab4-4f9f-a55b-fdd680b37343",
+      "name": "Send Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1820,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Adzuna - Get Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Adzuna - Get Jobs": {
+      "main": [
+        [
+          {
+            "node": "Split Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Jobs": {
+      "main": [
+        [
+          {
+            "node": "Filter AI Roles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter AI Roles": {
+      "main": [
+        [
+          {
+            "node": "Remove Seen Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove Seen Jobs": {
+      "main": [
+        [
+          {
+            "node": "Build Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Prompt": {
+      "main": [
+        [
+          {
+            "node": "Gemini - Score Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini - Score Job": {
+      "main": [
+        [
+          {
+            "node": "Parse & Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Merge": {
+      "main": [
+        [
+          {
+            "node": "Keep Strong Matches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep Strong Matches": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
