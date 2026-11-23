@@ -43,3 +43,15 @@ The duplicate-removal node uses the listing’s redirect URL and retains up to 1
 Import the [public JSON](ai-job-alerts.n8n.json) into a separate n8n workspace with scheduling disabled. Configure your own test credentials and chat destination. Use synthetic listings to check a repeated URL, an invalid model response and scores immediately below and at 65 before testing delivery to your own chat.
 
 The private version’s schedule, per-source results and delivery reliability still require current execution evidence.
+
+## Evidence needed for independent review of the private edition
+
+1. Match seven distinct fetch nodes to their sources, classify each connection as API or feed, and trace each into aggregation.
+2. Check dated execution results for each source in the review window, including failed or empty results.
+3. Confirm the active schedule, alert threshold and suppression settings.
+4. Check cross-source duplicates and repeat runs with synthetic listings.
+5. Check malformed Gemini output, timeouts and provider 429/503 responses. Record actual retry behavior.
+6. Match a successful Telegram delivery to a redacted receipt or alert.
+7. Pin the evidence revision or checksum. Publish a sanitized artifact only with owner approval.
+
+A structure summary can support the first check. Execution results and delivery receipts are separate evidence. Review any retained node labels, hostnames and filenames before sharing.
